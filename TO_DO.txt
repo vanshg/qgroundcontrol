@@ -1,0 +1,10 @@
+Modifying QGroundControl's User Interface
+
+This is our attempt of obstacle avoidance:
+The interoperability system will relay an obstacle’s GPS coordinates to QGroundControl.
+QGroundControl will plot the obstacle’s location on the map.
+A human operator will analyze its location and reroute the plane’s waypoints as necessary in order to successfully avoid the obstacle.
+
+After our attempt, these are our next goals:
+If the modifications in QGroundControl are successful, ground control will be able to have automatic rerouting. After computing an alternative route, a new mission will be sent to the plane.
+This is a long-term goal that may not be implemented. Instead of a mission, only GPS data corresponding to the obstacles will be sent to the plane. The plane then reroutes itself in order to avoid obstacles.
