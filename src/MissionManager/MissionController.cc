@@ -23,6 +23,7 @@
 #include "SettingsManager.h"
 #include "AppSettings.h"
 #include "MissionSettingsItem.h"
+#include "QGCQGeoCoordinate.h"
 
 #ifndef __mobile__
 #include "MainWindow.h"
@@ -334,40 +335,7 @@ void MissionController::removeAll(void)
         _addMissionSettings(_activeVehicle, _visualItems, false /* addToCenter */);
         _initAllVisualItems();
         _visualItems->setDirty(true);
-       _resetMissionFlightStatus();
-    }
-}
-
-bool MissionController::_loadJsonMissionFile(Vehicle* vehicle, const QByteArray& bytes, QmlObjectListModel* visualItems, QString& errorString)
-{
-    QJsonParseError jsonParseError;
-    QJsonDocument   jsonDoc(QJsonDocument::fromJson(bytes, &jsonParseError));
-
-    if (jsonParseError.error != QJsonParseError::NoError) {
-        errorString = jsonParseError.errorString();
-        return false;
-    }
-    QJsonObject json = jsonDoc.object();
-
-    // V1 file format has no file type key and version key is string. Convert to new format.
-    if (!json.contains(JsonHelper::jsonFileTypeKey)) {
-        json[JsonHelper::jsonFileTypeKey] = _jsonFileTypeValue;
-    }
-
-    int fileVersion;
-    if (!JsonHelper::validateQGCJsonFile(json,
-                                         _jsonFileTypeValue,    // expected file type
-                                         1,                     // minimum supported version
-                                         2,                     // maximum supported version
-                                         fileVersion,
-                                         errorString)) {
-        return false;
-    }
-
-    if (fileVersion == 1) {
-        return _loadJsonMissionFileV1(vehicle, json, visualItems, errorString);
-    } else {
-        return _loadJsonMissionFileV2(vehicle, json, visualItems, errorString);
+        _resetMissionFlightStatus();
     }
 }
 
@@ -611,6 +579,32 @@ bool MissionController::_loadJsonMissionFileV2(Vehicle* vehicle, const QJsonObje
     return true;
 }
 
+#if 0
+bool MissionController::_loadItemsFromJson(const QJsonObject& json, QmlObjectListModel* visualItems, QString& errorString)
+{
+    // V1 file format has no file type key and version key is string. Convert to new format.
+    if (!json.contains(JsonHelper::jsonFileTypeKey)) {
+        json[JsonHelper::jsonFileTypeKey] = _jsonFileTypeValue;
+    }
+
+    int fileVersion;
+    if (!JsonHelper::validateQGCJsonFile(json,
+                                         _jsonFileTypeValue,    // expected file type
+                                         1,                     // minimum supported version
+                                         2,                     // maximum supported version
+                                         fileVersion,
+                                         errorString)) {
+        return false;
+    }
+
+    if (fileVersion == 1) {
+        return _loadJsonMissionFileV1(_activeVehicle, json, visualItems, errorString);
+    } else {
+        return _loadJsonMissionFileV2(_activeVehicle, json, visualItems, errorString);
+    }
+}
+#endif
+
 bool MissionController::_loadTextMissionFile(Vehicle* vehicle, QTextStream& stream, QmlObjectListModel* visualItems, QString& errorString)
 {
     bool addPlannedHomePosition = false;
@@ -661,12 +655,15 @@ bool MissionController::_loadTextMissionFile(Vehicle* vehicle, QTextStream& stre
     return true;
 }
 
-void MissionController::loadFromFile(const QString& filename)
+bool MissionController::load(const QJsonObject& json, QString& errorString)
 {
-    QmlObjectListModel* newVisualItems = NULL;
+    QString errorStr;
+    QString errorMessage = tr("Mission: %1");
+    QmlObjectListModel* newVisualItems = new QmlObjectListModel(this);
 
-    if (!loadItemsFromFile(_activeVehicle, filename, &newVisualItems)) {
-        return;
+    if (!_loadJsonMissionFileV2(_activeVehicle, json, newVisualItems, errorStr)) {
+        errorString = errorMessage.arg(errorStr);
+        return false;
     }
 
     if (_visualItems) {
@@ -689,117 +686,54 @@ void MissionController::loadFromFile(const QString& filename)
         // Needs a sync to vehicle
         setDirty(true);
     }
-}
-
-bool MissionController::loadItemsFromFile(Vehicle* vehicle, const QString& filename, QmlObjectListModel** visualItems)
-{
-    *visualItems = NULL;
-
-    QString errorString;
-
-    if (filename.isEmpty()) {
-        return false;
-    }
-
-    *visualItems = new QmlObjectListModel();
-
-    QFile file(filename);
-
-    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        errorString = file.errorString() + QStringLiteral(" ") + filename;
-    } else {
-        QByteArray  bytes = file.readAll();
-        QTextStream stream(&bytes);
-
-        QString firstLine = stream.readLine();
-        if (firstLine.contains(QRegExp("QGC.*WPL"))) {
-            stream.seek(0);
-            _loadTextMissionFile(vehicle, stream, *visualItems, errorString);
-        } else {
-            _loadJsonMissionFile(vehicle, bytes, *visualItems, errorString);
-        }
-    }
-
-    if (!errorString.isEmpty()) {
-        (*visualItems)->deleteLater();
-
-        qgcApp()->showMessage(errorString);
-        return false;
-    }
 
     return true;
 }
 
-void MissionController::saveToFile(const QString& filename)
+void MissionController::save(QJsonObject& json)
 {
-    if (filename.isEmpty()) {
+    json[JsonHelper::jsonVersionKey] = _missionFileVersion;
+
+    // Mission settings
+
+    MissionSettingsItem* settingsItem = _visualItems->value<MissionSettingsItem*>(0);
+    if (!settingsItem) {
+        qWarning() << "First item is not MissionSettingsItem";
         return;
     }
+    QJsonValue coordinateValue;
+    JsonHelper::saveGeoCoordinate(settingsItem->coordinate(), true /* writeAltitude */, coordinateValue);
+    json[_jsonPlannedHomePositionKey] = coordinateValue;
+    json[_jsonFirmwareTypeKey] = _activeVehicle->firmwareType();
+    json[_jsonVehicleTypeKey] = _activeVehicle->vehicleType();
+    json[_jsonCruiseSpeedKey] = _activeVehicle->defaultCruiseSpeed();
+    json[_jsonHoverSpeedKey] = _activeVehicle->defaultHoverSpeed();
 
-    QString missionFilename = filename;
-    if (!QFileInfo(filename).fileName().contains(".")) {
-        missionFilename += QString(".%1").arg(AppSettings::missionFileExtension);
+    // Save the visual items
+
+    QJsonArray rgJsonMissionItems;
+    for (int i=0; i<_visualItems->count(); i++) {
+        VisualMissionItem* visualItem = qobject_cast<VisualMissionItem*>(_visualItems->get(i));
+
+        visualItem->save(rgJsonMissionItems);
     }
 
-    QFile file(missionFilename);
+    // Mission settings has a special case for end mission action
+    if (settingsItem) {
+        QList<MissionItem*> rgMissionItems;
 
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
-        qgcApp()->showMessage(tr("Mission save %1 : %2").arg(filename).arg(file.errorString()));
-    } else {
-        QJsonObject missionFileObject;      // top level json object
-
-        missionFileObject[JsonHelper::jsonVersionKey] =         _missionFileVersion;
-        missionFileObject[JsonHelper::jsonGroundStationKey] =   JsonHelper::jsonGroundStationValue;
-
-        // Mission settings
-
-        MissionSettingsItem* settingsItem = _visualItems->value<MissionSettingsItem*>(0);
-        if (!settingsItem) {
-            qWarning() << "First item is not MissionSettingsItem";
-            return;
+        if (_convertToMissionItems(_visualItems, rgMissionItems, this /* missionItemParent */)) {
+            QJsonObject saveObject;
+            MissionItem* missionItem = rgMissionItems[rgMissionItems.count() - 1];
+            missionItem->save(saveObject);
+            rgJsonMissionItems.append(saveObject);
         }
-        QJsonValue coordinateValue;
-        JsonHelper::saveGeoCoordinate(settingsItem->coordinate(), true /* writeAltitude */, coordinateValue);
-        missionFileObject[_jsonPlannedHomePositionKey] = coordinateValue;
-        missionFileObject[_jsonFirmwareTypeKey] = _activeVehicle->firmwareType();
-        missionFileObject[_jsonVehicleTypeKey] = _activeVehicle->vehicleType();
-        missionFileObject[_jsonCruiseSpeedKey] = _activeVehicle->defaultCruiseSpeed();
-        missionFileObject[_jsonHoverSpeedKey] = _activeVehicle->defaultHoverSpeed();
-
-        // Save the visual items
-
-        QJsonArray rgJsonMissionItems;
-        for (int i=0; i<_visualItems->count(); i++) {
-            VisualMissionItem* visualItem = qobject_cast<VisualMissionItem*>(_visualItems->get(i));
-
-            visualItem->save(rgJsonMissionItems);
+        for (int i=0; i<rgMissionItems.count(); i++) {
+            rgMissionItems[i]->deleteLater();
         }
-
-        // Mission settings has a special case for end mission action
-        if (settingsItem) {
-            QList<MissionItem*> rgMissionItems;
-
-            if (_convertToMissionItems(_visualItems, rgMissionItems, this /* missionItemParent */)) {
-                QJsonObject saveObject;
-                MissionItem* missionItem = rgMissionItems[rgMissionItems.count() - 1];
-                missionItem->save(saveObject);
-                rgJsonMissionItems.append(saveObject);
-            }
-            for (int i=0; i<rgMissionItems.count(); i++) {
-                rgMissionItems[i]->deleteLater();
-            }
-        }
-
-        missionFileObject[_jsonItemsKey] = rgJsonMissionItems;
-
-        QJsonDocument saveDoc(missionFileObject);
-        file.write(saveDoc.toJson());
     }
 
-    // If we are connected to a real vehicle, don't clear dirty bit on saving to file since vehicle is still out of date
-    if (_activeVehicle->isOfflineEditingVehicle()) {
-        _visualItems->setDirty(false);
-    }
+    json[_jsonItemsKey] = rgJsonMissionItems;
 }
 
 void MissionController::_calcPrevWaypointValues(double homeAlt, VisualMissionItem* currentItem, VisualMissionItem* prevItem, double* azimuth, double* distance, double* altDifference)
@@ -1319,7 +1253,7 @@ void MissionController::_itemCommandChanged(void)
     _recalcWaypointLines();
 }
 
-void MissionController::_activeVehicleBeingRemoved(void)
+void MissionController::activeVehicleBeingRemoved(void)
 {
     qCDebug(MissionControllerLog) << "MissionController::_activeVehicleBeingRemoved";
 
@@ -1330,15 +1264,20 @@ void MissionController::_activeVehicleBeingRemoved(void)
     disconnect(missionManager, &MissionManager::currentIndexChanged,        this, &MissionController::_currentMissionIndexChanged);
     disconnect(missionManager, &MissionManager::lastCurrentIndexChanged,    this, &MissionController::resumeMissionIndexChanged);
     disconnect(missionManager, &MissionManager::resumeMissionReady,         this, &MissionController::resumeMissionReady);
+    disconnect(missionManager, &MissionManager::cameraFeedback,             this, &MissionController::_cameraFeedback);
     disconnect(_activeVehicle, &Vehicle::homePositionChanged,               this, &MissionController::_activeVehicleHomePositionChanged);
 
     // We always remove all items on vehicle change. This leaves a user model hole:
     //      If the user has unsaved changes in the Plan view they will lose them
     removeAll();
+
+    _activeVehicle = NULL;
 }
 
-void MissionController::_activeVehicleSet(void)
+void MissionController::activeVehicleSet(Vehicle* activeVehicle)
 {
+    _activeVehicle = activeVehicle;
+
     // We always remove all items on vehicle change. This leaves a user model hole:
     //      If the user has unsaved changes in the Plan view they will lose them
     removeAll();
@@ -1350,6 +1289,7 @@ void MissionController::_activeVehicleSet(void)
     connect(missionManager, &MissionManager::currentIndexChanged,       this, &MissionController::_currentMissionIndexChanged);
     connect(missionManager, &MissionManager::lastCurrentIndexChanged,   this, &MissionController::resumeMissionIndexChanged);
     connect(missionManager, &MissionManager::resumeMissionReady,        this, &MissionController::resumeMissionReady);
+    connect(missionManager, &MissionManager::cameraFeedback,            this, &MissionController::_cameraFeedback);
     connect(_activeVehicle, &Vehicle::homePositionChanged,              this, &MissionController::_activeVehicleHomePositionChanged);
     connect(_activeVehicle, &Vehicle::defaultCruiseSpeedChanged,        this, &MissionController::_recalcMissionFlightStatus);
     connect(_activeVehicle, &Vehicle::defaultHoverSpeedChanged,         this, &MissionController::_recalcMissionFlightStatus);
@@ -1526,11 +1466,6 @@ void MissionController::setDirty(bool dirty)
     }
 }
 
-QString MissionController::fileExtension(void) const
-{
-    return AppSettings::missionFileExtension;
-}
-
 void MissionController::_scanForAdditionalSettings(QmlObjectListModel* visualItems, Vehicle* vehicle)
 {
     // First we look for a Fixed Wing Landing Pattern which is at the end
@@ -1543,7 +1478,9 @@ void MissionController::_scanForAdditionalSettings(QmlObjectListModel* visualIte
         qCDebug(MissionControllerLog) << "MissionController::_scanForAdditionalSettings count:scanIndex" << visualItems->count() << scanIndex;
 
         MissionSettingsItem* settingsItem = qobject_cast<MissionSettingsItem*>(visualItem);
-        if (settingsItem && settingsItem->scanForMissionSettings(visualItems, scanIndex)) {
+        if (settingsItem) {
+            scanIndex++;
+            settingsItem->scanForMissionSettings(visualItems, scanIndex);
             continue;
         }
 
@@ -1611,4 +1548,17 @@ void MissionController::applyDefaultMissionAltitude(void)
         VisualMissionItem* item = _visualItems->value<VisualMissionItem*>(i);
         item->applyNewAltitude(defaultAltitude);
     }
+}
+
+void MissionController::_cameraFeedback(QGeoCoordinate imageCoordinate, int index)
+{
+    Q_UNUSED(index);
+    if (!_editMode) {
+        _cameraPoints.append(new QGCQGeoCoordinate(imageCoordinate, this));
+    }
+}
+
+void MissionController::clearCameraPoints(void)
+{
+    _cameraPoints.clearAndDeleteContents();
 }

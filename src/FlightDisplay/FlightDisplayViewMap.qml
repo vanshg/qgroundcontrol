@@ -29,12 +29,12 @@ FlightMap {
     mapName:                    _mapName
     allowGCSLocationCenter:     !userPanned
     allowVehicleLocationCenter: !_keepVehicleCentered
+    planView:                   false
 
     property alias  scaleState: mapScale.state
 
-    property var    missionController
-    property var    geoFenceController
-    property var    rallyPointController
+    // The following properties must be set by the consumer
+    property var    planMasterController
     property var    guidedActionsController
     property var    flightWidgets
     property var    rightPanelWidth
@@ -42,6 +42,10 @@ FlightMap {
 
     property rect   centerViewport:             Qt.rect(0, 0, width, height)
 
+    property var    _planMasterController:      planMasterController
+    property var    _missionController:         _planMasterController.missionController
+    property var    _geoFenceController:        _planMasterController.geoFenceController
+    property var    _rallyPointController:      _planMasterController.rallyPointController
     property var    _activeVehicle:             QGroundControl.multiVehicleManager.activeVehicle
     property var    _activeVehicleCoordinate:   _activeVehicle ? _activeVehicle.coordinate : QtPositioning.coordinate()
     property var    _gotoHereCoordinate:        QtPositioning.coordinate()
@@ -130,10 +134,10 @@ FlightMap {
     QGCMapPalette { id: mapPal; lightColors: isSatelliteMap }
 
     Connections {
-        target: missionController
+        target: _missionController
 
         onNewItemsFromVehicle: {
-            var visualItems = missionController.visualItems
+            var visualItems = _missionController.visualItems
             if (visualItems && visualItems.count != 1) {
                 mapFitFunctions.fitMapViewportToMissionItems()
                 firstVehiclePositionReceived = true
@@ -149,9 +153,7 @@ FlightMap {
         id:                         mapFitFunctions
         map:                        _flightMap
         usePlannedHomePosition:     false
-        mapMissionController:      missionController
-        mapGeoFenceController:     geoFenceController
-        mapRallyPointController:   rallyPointController
+        planMasterController:       _planMasterController
 
         property real leftToolWidth:    toolStrip.x + toolStrip.width
     }
@@ -186,7 +188,7 @@ FlightMap {
 
     // Add the mission item visuals to the map
     Repeater {
-        model: _mainIsMap ? missionController.visualItems : 0
+        model: _mainIsMap ? _missionController.visualItems : 0
 
         delegate: MissionItemMapVisual {
             map:        flightMap
@@ -196,12 +198,12 @@ FlightMap {
 
     // Add lines between waypoints
     MissionLineView {
-        model:  _mainIsMap ? missionController.waypointLines : 0
+        model:  _mainIsMap ? _missionController.waypointLines : 0
     }
 
     GeoFenceMapVisuals {
         map:                    flightMap
-        myGeoFenceController:   geoFenceController
+        myGeoFenceController:   _geoFenceController
         interactive:            false
         planView:               false
         homePosition:           _activeVehicle && _activeVehicle.homePosition.isValid ? _activeVehicle.homePosition : undefined
@@ -209,7 +211,7 @@ FlightMap {
 
     // Rally points on map
     MapItemView {
-        model: rallyPointController.points
+        model: _rallyPointController.points
 
         delegate: MapQuickItem {
             id:             itemIndicator
@@ -238,6 +240,16 @@ FlightMap {
             label:   qsTr("G", "Goto here waypoint") // second string is translator's hint.
         }
     }    
+
+    // Camera points
+    MapItemView {
+        model: _missionController.cameraPoints
+
+        delegate: CameraTriggerIndicator {
+            coordinate:     object.coordinate
+            z:              QGroundControl.zOrderTopMost
+        }
+    }
 
     // Handle guided mode clicks
     MouseArea {

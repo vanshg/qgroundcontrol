@@ -19,9 +19,10 @@ Rectangle {
     color:  _currentItem ? qgcPal.primaryButton : qgcPal.windowShade
     radius: _radius
 
-    property var    map             ///< Map control
-    property var    missionItem     ///< MissionItem associated with this editor
-    property bool   readOnly        ///< true: read only view, false: full editing view
+    property var    map                 ///< Map control
+    property var    missionController
+    property var    missionItem         ///< MissionItem associated with this editor
+    property bool   readOnly            ///< true: read only view, false: full editing view
     property var    rootQgcView
 
     signal clicked
@@ -33,6 +34,7 @@ Rectangle {
     property color  _outerTextColor:            _currentItem ? qgcPal.primaryButtonText : qgcPal.text
     property bool   _noMissionItemsAdded:       ListView.view.model.count === 1
     property real   _sectionSpacer:             ScreenTools.defaultFontPixelWidth / 2  // spacing between section headings
+    property bool   _singleComplexItem:         missionController.complexMissionItemNames.length === 1
 
     readonly property real  _editFieldWidth:    Math.min(width - _margin * 2, ScreenTools.defaultFontPixelWidth * 12)
     readonly property real  _margin:            ScreenTools.defaultFontPixelWidth / 2
@@ -63,7 +65,7 @@ Rectangle {
         anchors.verticalCenter: commandPicker.verticalCenter
         anchors.leftMargin:     _margin
         anchors.left:           parent.left
-        text:                   missionItem.abbreviation.charAt(0)
+        text:                   missionItem.homePosition ? "H" : missionItem.sequenceNumber
         color:                  _outerTextColor
     }
 
@@ -97,26 +99,33 @@ Rectangle {
                 onTriggered:    insertWaypoint()
             }
 
-            MenuItem {
-                text:           qsTr("Delete")
-                onTriggered:    remove()
-            }
-
             Menu {
-                id:     normalPatternMenu
-                title:  qsTr("Insert pattern")
+                id:         patternMenu
+                title:      qsTr("Insert pattern")
+                visible:    !_singleComplexItem
 
                 Instantiator {
                     model: missionController.complexMissionItemNames
 
-                    onObjectAdded:      normalPatternMenu.insertItem(index, object)
-                    onObjectRemoved:    normalPatternMenu.removeItem(object)
+                    onObjectAdded:      patternMenu.insertItem(index, object)
+                    onObjectRemoved:    patternMenu.removeItem(object)
 
                     MenuItem {
                         text:           modelData
                         onTriggered:    insertComplexItem(modelData)
                     }
                 }
+            }
+
+            MenuItem {
+                text:           qsTr("Insert ") + missionController.complexMissionItemNames[0]
+                visible:        _singleComplexItem
+                onTriggered:    insertComplexItem(missionController.complexMissionItemNames[0])
+            }
+
+            MenuItem {
+                text:           qsTr("Delete")
+                onTriggered:    remove()
             }
 
             MenuItem {
