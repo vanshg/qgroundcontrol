@@ -177,6 +177,11 @@ void RallyPointController::_loadComplete(const QList<QGeoCoordinate> rgPoints)
 
 void RallyPointController::addPoint(QGeoCoordinate point)
 {
+    addPoint(point, false);
+}
+
+void RallyPointController::addPoint(QGeoCoordinate point, bool isObstacle)
+{
     double defaultAlt;
     if (_points.count()) {
         defaultAlt = qobject_cast<RallyPoint*>(_points[_points.count() - 1])->coordinate().altitude();
@@ -185,6 +190,7 @@ void RallyPointController::addPoint(QGeoCoordinate point)
     }
     point.setAltitude(defaultAlt);
     RallyPoint* newPoint = new RallyPoint(point, this);
+    newPoint->setObstacle(isObstacle);
     _points.append(newPoint);
     setCurrentRallyPoint(newPoint);
     setDirty(true);

@@ -37,7 +37,9 @@ public:
     void setCoordinate(const QGeoCoordinate& coordinate);
 
     bool dirty(void) const { return _dirty; }
+    bool isObstacle(void) const {return _isObstacle; }
     void setDirty(bool dirty);
+    void setObstacle(bool obstacle);
 
 signals:
     void coordinateChanged      (const QGeoCoordinate& coordinate);
@@ -50,6 +52,7 @@ private:
     void _factSetup(void);
 
     bool _dirty;
+    bool _isObstacle;
     Fact _longitudeFact;
     Fact _latitudeFact;
     Fact _altitudeFact;
