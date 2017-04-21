@@ -134,7 +134,9 @@ void RallyPointController::sendToVehicle(void)
         setDirty(false);
         QList<QGeoCoordinate> rgPoints;
         for (int i=0; i<_points.count(); i++) {
-            rgPoints.append(qobject_cast<RallyPoint*>(_points[i])->coordinate());
+            if (!qobject_cast<RallyPoint*>(_points[i])->isObstacle()) {
+                rgPoints.append(qobject_cast<RallyPoint*>(_points[i])->coordinate());
+            }
         }
         _activeVehicle->rallyPointManager()->sendToVehicle(rgPoints);
     } else {

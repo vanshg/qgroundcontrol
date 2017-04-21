@@ -35,6 +35,7 @@ public:
     Q_PROPERTY(QObject*             currentRallyPoint       READ currentRallyPoint      WRITE setCurrentRallyPoint  NOTIFY currentRallyPointChanged)
 
     Q_INVOKABLE void addPoint(QGeoCoordinate point);
+    Q_INVOKABLE void addPoint(QGeoCoordinate point, bool isObstacle);
     Q_INVOKABLE void removePoint(QObject* rallyPoint);
 
     void save                   (QJsonObject& json) final;
